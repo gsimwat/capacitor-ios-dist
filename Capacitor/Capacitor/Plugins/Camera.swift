@@ -184,6 +184,7 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
   private func presentPhotos() {
     self.configurePicker()
     self.imagePicker!.sourceType = .photoLibrary
+    self.imagePicker!.mediaTypes = ["public.image", "public.movie"]
     self.bridge.viewController.present(self.imagePicker!, animated: true, completion: nil)
   }
 
@@ -208,10 +209,20 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
 
   public func imagePickerController(_ picker: UIImagePickerController,
                                     didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+
+    let mediaType = info[UIImagePickerController.InfoKey.mediaType] as? String
+    if mediaType == "public.image" {
+        return imagePicked(picker, didFinishPickingMediaWithInfo: info)
+    } else {
+        return videoPicked(picker, didFinishPickingMediaWithInfo: info)
+    }
+  }
+    
+  func imagePicked(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
     var image: UIImage?
     var isEdited = false
     var isGallery = true
-
+    
     if let editedImage = info[UIImagePickerController.InfoKey.editedImage] as? UIImage {
       // Use editedImage Here
       isEdited = true
@@ -289,7 +300,31 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
 
     picker.dismiss(animated: true, completion: nil)
   }
+    
+  func videoPicked(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
 
+    if settings.resultType == CameraResultType.base64.rawValue {
+        let videoUrl = info[UIImagePickerController.InfoKey.mediaURL] as! URL
+        do {
+          let video = try NSData(contentsOf: videoUrl, options: .mappedIfSafe)
+          let base64String = video.base64EncodedString()
+
+          self.call?.success([
+            "base64String": base64String,
+            "exif": [:],
+            "format": "mov"
+          ])
+        }
+        catch {
+            self.call?.error("ERROR reading video '" + videoUrl.absoluteString + "'")
+        }
+    } else {
+        self.call?.error("ResultType " + settings.resultType + " is not supported for videos")
+    }
+
+    picker.dismiss(animated: true, completion: nil)
+  }
+    
   func metadataFromImageData(data: NSData)-> [String: Any]? {
     let options = [kCGImageSourceShouldCache as String: kCFBooleanFalse]
     if let imgSrc = CGImageSourceCreateWithData(data, options as CFDictionary) {
