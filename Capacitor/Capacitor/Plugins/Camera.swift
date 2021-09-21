@@ -318,6 +318,20 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
         catch {
             self.call?.error("ERROR reading video '" + videoUrl.absoluteString + "'")
         }
+        
+    } else if settings.resultType == CameraResultType.uri.rawValue {
+        let videoUrl = info[UIImagePickerController.InfoKey.mediaURL] as! URL
+        guard let webPath = CAPFileManager.getPortablePath(host: bridge.getLocalUrl(), uri: URL(string: videoUrl.absoluteString)) else {
+            call?.reject("Unable to get portable path to file")
+            return
+        }
+        self.call?.success([
+            "path": videoUrl.absoluteString,
+            "exif": [:],
+            "webPath": webPath,
+            "format": "mov"
+        ])
+    
     } else {
         self.call?.error("ResultType " + settings.resultType + " is not supported for videos")
     }
