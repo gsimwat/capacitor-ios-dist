@@ -40,7 +40,7 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
   var imagePicker: UIImagePickerController?
   var call: CAPPluginCall?
 
-  var imageCounter = 0
+  var mediaCounter = 0
 
   var settings = CameraSettings()
   
@@ -191,6 +191,7 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
   private func configurePicker() {
     self.imagePicker!.modalPresentationStyle = .popover
     self.imagePicker!.popoverPresentationController?.delegate = self
+    self.imagePicker!.videoExportPreset = AVAssetExportPresetMediumQuality
     self.setCenteredPopover(self.imagePicker!)
   }
 
@@ -285,16 +286,16 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
         "format": "jpeg"
       ])
     } else if settings.resultType == CameraResultType.uri.rawValue {
-      let path = try! saveTemporaryImage(jpeg)
-      guard let webPath = CAPFileManager.getPortablePath(host: bridge.getLocalUrl(), uri: URL(string: path)) else {
-        call?.reject("Unable to get portable path to file")
-        return
-      }
-      call?.success([
-        "path": path,
-        "exif": makeExif(imageMetadata) ?? [:],
-        "webPath": webPath,
-        "format": "jpeg"
+        let path = try! saveTemporaryImage(jpeg)
+        guard let webPath = CAPFileManager.getPortablePath(host: bridge.getLocalUrl(), uri: URL(string: path)) else {
+            call?.reject("Unable to get portable path to file")
+            return
+        }
+        call?.success([
+            "path": path,
+            "exif": makeExif(imageMetadata) ?? [:],
+            "webPath": webPath,
+            "format": "jpeg"
       ])
     }
 
@@ -302,7 +303,6 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
   }
     
   func videoPicked(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-
     if settings.resultType == CameraResultType.base64.rawValue {
         let videoUrl = info[UIImagePickerController.InfoKey.mediaURL] as! URL
         do {
@@ -321,16 +321,25 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
         
     } else if settings.resultType == CameraResultType.uri.rawValue {
         let videoUrl = info[UIImagePickerController.InfoKey.mediaURL] as! URL
-        guard let webPath = CAPFileManager.getPortablePath(host: bridge.getLocalUrl(), uri: URL(string: videoUrl.absoluteString)) else {
-            call?.reject("Unable to get portable path to file")
-            return
+        
+        do {
+            let video = try Data(contentsOf: videoUrl, options: .mappedIfSafe) as Data
+            let path = try! saveTemporaryVideo(video)
+            
+            guard let webPath = CAPFileManager.getPortablePath(host: bridge.getLocalUrl(), uri: URL(string: videoUrl.absoluteString)) else {
+                call?.reject("Unable to get portable path to file")
+                return
+            }
+            self.call?.success([
+                "path": path,
+                "exif": makeExif(info[UIImagePickerController.InfoKey.mediaMetadata] as? [AnyHashable: Any]) ?? [:],
+                "webPath": webPath,
+                "format": "mov"
+            ])
         }
-        self.call?.success([
-            "path": videoUrl.absoluteString,
-            "exif": [:],
-            "webPath": webPath,
-            "format": "mov"
-        ])
+        catch {
+            self.call?.error("ERROR reading video '" + videoUrl.absoluteString + "'")
+        }
     
     } else {
         self.call?.error("ResultType " + settings.resultType + " is not supported for videos")
@@ -428,16 +437,25 @@ public class CAPCameraPlugin : CAPPlugin, UIImagePickerControllerDelegate, UINav
     return newImage ?? image
   }
 
-  func saveTemporaryImage(_ data: Data) throws -> String {
-    var url: URL
-    repeat {
-      imageCounter += 1
-      url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("photo-\(imageCounter).jpg")
-    } while FileManager.default.fileExists(atPath: url.absoluteString)
+    func saveTemporaryVideo(_ data: Data) throws -> String {
+        try saveTemporaryMedia(data, prefix: "video", ext: "mov")
+    }
+    
+    func saveTemporaryImage(_ data: Data) throws -> String {
+        try saveTemporaryMedia(data, prefix: "photo", ext: "jpg")
+    }
+    
+    func saveTemporaryMedia(_ data: Data, prefix: String, ext: String) throws -> String {
+        var url: URL
+        repeat {
+          mediaCounter += 1
+          url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(prefix)-\(mediaCounter).\(ext)")
+        } while FileManager.default.fileExists(atPath: url.absoluteString)
 
-    try data.write(to: url, options: .atomic)
-    return url.absoluteString
-  }
+        try data.write(to: url, options: .atomic)
+        return url.absoluteString
+    }
+    
 
   /**
    * Make sure the developer provided proper usage descriptions
